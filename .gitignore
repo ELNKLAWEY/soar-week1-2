@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+*.egg-info/
+dist/
+build/
+
+# Large local datasets / trained artifacts (do not commit)
+data/raw/*.csv
+data/cicids2017/**
+data/cicids2018/**
+!data/**/.gitkeep
+models/*.joblib
+models/*.csv
+models/*.txt
+models/*.xlsx
+!models/.gitkeep
+flows.csv
+alerts.jsonl
+logs/**
+!logs/.gitkeep
+
+# Extracted PDF text (local helper only)
+docs/_extracted/

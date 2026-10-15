@@ -1,0 +1,32 @@
+name: web_bruteforce_response
+trigger:
+  incident_type: brute_force
+  min_severity: medium
+steps:
+  - id: enrich
+    action: enrichment.collect
+  - id: decide
+    action: agent.decide
+  - id: contain
+    action: haproxy.block_ip
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: "{{ decide.ttl }}"
+  - id: lock
+    action: webapp.lock_account
+    when: decide.target_user
+    args:
+      user: "{{ decide.target_user }}"
+  - id: notify
+    action: notify.send
+    args:
+      channel: telegram
+  - id: verify
+    action: haproxy.verify_block
+    args:
+      ip: "{{ incident.src_ip }}"
+on_error:
+  retry: 3
+  backoff: exponential
+  fallback: notify.send

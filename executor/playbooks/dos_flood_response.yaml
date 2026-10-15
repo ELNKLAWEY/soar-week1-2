@@ -1,0 +1,35 @@
+name: dos_flood_response
+trigger:
+  incident_type: dos
+  min_severity: high
+steps:
+  - id: enrich
+    action: enrichment.collect
+  - id: decide
+    action: agent.decide
+  - id: rate
+    action: haproxy.rate_limit_ip
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      rate: "{{ decide.rate_limit }}"
+  - id: contain
+    action: haproxy.block_ip
+    when: 'decide.escalate == "true"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: "{{ decide.ttl }}"
+  - id: notify
+    action: notify.send
+    args:
+      channel: telegram
+      message: "DoS response for {{ incident.src_ip }}"
+  - id: verify
+    action: haproxy.verify_block
+    when: 'decide.escalate == "true"'
+    args:
+      ip: "{{ incident.src_ip }}"
+on_error:
+  retry: 3
+  backoff: exponential
+  fallback: notify.send
