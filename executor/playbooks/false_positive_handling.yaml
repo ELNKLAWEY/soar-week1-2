@@ -1,0 +1,25 @@
+name: false_positive_handling
+description: False positive - undo containment, close the case, record feedback, propose rule tuning
+trigger:
+  verdict: false_positive
+steps:
+  - id: unblock
+    action: haproxy.unblock_ip
+    when: incident.src_ip
+    args:
+      ip: "{{ incident.src_ip }}"
+  - id: feedback
+    action: case.update_case
+    args:
+      note: "False positive: {{ decide.reason }}"
+      tag: analyst_feedback
+  - id: tune
+    action: case.update_case
+    when: incident.rule_id
+    args:
+      tag: tuning_proposal
+      note: "Propose tuning rule {{ incident.rule_id }} (false positive)"
+  - id: close
+    action: case.update_case
+    args:
+      status: false_positive

@@ -1,15 +1,18 @@
-# Sentinel — SOAR Week 1–2 (Mohamed Osama)
+# Sentinel — SOAR core (Mohamed Osama)
 
-Week 1–2 deliverables for the graduation SOAR project: **action contract, Policy Guard, playbook engine, executor stubs**, plus local CIC-IDS training notes.
-
-Not the full platform yet — just the SOAR-core slice so the team can agree on contracts and run a local demo.
+SOAR core of the graduation project: action contract, Policy Guard, playbook engine and the
+10-playbook library, executor on Redis Streams, real HAProxy blocking, website hooks, case
+management, and the Playbook Studio / Actions Ledger pages. Details: [`executor/README.md`](executor/README.md).
 
 ## What's in here
 
 | Path | What |
 |---|---|
 | `common/schemas/` | Shared `ActionRequest` / `ActionResult` schemas |
-| `executor/` | Policy Guard, playbooks, worker, mocks, queue, audit |
+| `executor/` | Policy Guard, playbooks, worker, Redis queue, HAProxy + website connectors, cases, API, pages |
+| `website_hooks/` | Platform endpoints for skyline-web (lock account, end sessions, WAF, quarantine) |
+| `deploy/haproxy/` | HAProxy config with the runtime socket and ACL files |
+| `docker-compose.yml` | Lab stack: Redis, HAProxy, website, executor, attacker container |
 | `ml/` | Detection/train scripts (Habiba/Alaa area; local train helpers) |
 | `docs/` | Plans, contracts, PDFs for the team |
 | `docs/reports/` | Completion report, action contract PDF, ML report, handoff guide |
@@ -22,8 +25,11 @@ cd soar-week1-2
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pytest executor/tests -q
+pytest -q
 python -m executor.demo
+
+# real stack (Redis + HAProxy): Ledger http://localhost:8080/ui/ledger.html
+docker compose up -d --build
 ```
 
 ## Team PDFs (share these)
@@ -41,9 +47,9 @@ Contract (markdown): `docs/contracts/action_contract.md`
 - `models/*.joblib` — local train artifact; see ML report PDF instead
 - `.venv/`, `logs/`
 
-## Week 3+ (not here yet)
+## Review fixes (Week 3)
 
-Redis Streams, real HAProxy socket, full playbook library, cases, dashboard.
+See [`docs/Mohamed_Week3_Review_Fixes.md`](docs/Mohamed_Week3_Review_Fixes.md) for each review point and its evidence.
 
 ---
 

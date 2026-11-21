@@ -1,0 +1,34 @@
+name: malicious_upload_response
+description: Malicious file upload - quarantine file, block IP, notify
+trigger:
+  incident_type: malicious_upload
+  min_severity: medium
+steps:
+  - id: enrich
+    action: enrichment.collect
+  - id: decide
+    action: agent.decide
+  - id: quarantine
+    action: webapp.quarantine_file
+    when: incident.file_path
+    args:
+      path: "{{ incident.file_path }}"
+      gate: G2
+  - id: contain
+    action: haproxy.block_ip
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: "{{ decide.ttl }}"
+      gate: "{{ decide.gate }}"
+      reason: malicious upload
+  - id: notify
+    action: notify.send
+    args:
+      channel: telegram
+      message: "Quarantined {{ incident.file_path }} uploaded from {{ incident.src_ip }}"
+  - id: verify
+    action: haproxy.verify_block
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"

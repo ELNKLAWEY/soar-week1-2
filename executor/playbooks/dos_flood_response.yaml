@@ -1,4 +1,5 @@
 name: dos_flood_response
+description: DoS / DDoS flood - rate-limit, tarpit, then block
 trigger:
   incident_type: dos
   min_severity: high
@@ -13,12 +14,19 @@ steps:
     args:
       ip: "{{ incident.src_ip }}"
       rate: "{{ decide.rate_limit }}"
+  - id: tarpit
+    action: haproxy.tarpit_ip
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"
   - id: contain
     action: haproxy.block_ip
     when: 'decide.escalate == "true"'
     args:
       ip: "{{ incident.src_ip }}"
       ttl_minutes: "{{ decide.ttl }}"
+      gate: "{{ decide.gate }}"
+      reason: flood
   - id: notify
     action: notify.send
     args:

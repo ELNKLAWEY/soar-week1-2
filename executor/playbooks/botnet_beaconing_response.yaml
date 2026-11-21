@@ -1,0 +1,34 @@
+name: botnet_beaconing_response
+description: Botnet / beaconing - block, isolate the container if the source is internal
+trigger:
+  incident_type: botnet
+  min_severity: high
+steps:
+  - id: enrich
+    action: enrichment.collect
+  - id: decide
+    action: agent.decide
+  - id: contain
+    action: haproxy.block_ip
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: "{{ decide.ttl }}"
+      gate: "{{ decide.gate }}"
+      reason: botnet beaconing
+  - id: isolate
+    action: docker.isolate_container
+    when: 'incident.internal == "true"'
+    args:
+      asset: "{{ incident.asset }}"
+      gate: G3
+  - id: notify
+    action: notify.send
+    args:
+      channel: telegram
+      message: "Botnet beaconing from {{ incident.src_ip }} ({{ incident.asset }})"
+  - id: verify
+    action: haproxy.verify_block
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"

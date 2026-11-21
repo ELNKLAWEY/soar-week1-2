@@ -1,0 +1,31 @@
+:root {
+  --bg: #0b1424; --panel: #111d33; --line: #1f2f4d; --text: #dbe5f5; --muted: #8a9bb8;
+  --accent: #19a3b5; --ok: #2fbf71; --bad: #e5534b; --warn: #e3a008;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--text); }
+header { display: flex; gap: 24px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0; }
+header a { color: var(--muted); text-decoration: none; }
+header a.active { color: var(--text); border-bottom: 2px solid var(--accent); }
+main { padding: 16px 20px; display: grid; gap: 16px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+section h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+tr.sel, tbody tr:hover { background: #16264a; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 5px; padding: 6px 12px; cursor: pointer; font: inherit; }
+button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+button.danger { background: var(--bad); }
+button:disabled { opacity: .4; cursor: default; }
+input, select, textarea { background: #0a1220; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: inherit; }
+textarea { width: 100%; font: 13px/1.5 ui-monospace, Menlo, monospace; resize: vertical; }
+code, pre { font: 12px/1.45 ui-monospace, Menlo, monospace; }
+pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--line); }
+.success, .ok { color: var(--ok); } .rejected, .failed, .bad { color: var(--bad); } .dry_run, .skipped, .warn { color: var(--warn); }
+.muted { color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+@media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } main { padding: 12px; } }

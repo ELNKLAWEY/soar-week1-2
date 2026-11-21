@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Actions Ledger</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Sentinel SOAR</h1>
+  <a href="studio.html">Playbook Studio</a>
+  <a href="ledger.html" class="active">Actions Ledger</a>
+</header>
+<main>
+  <section>
+    <div class="row" style="justify-content:space-between">
+      <h2>Autonomous actions</h2>
+      <div class="row">
+        <input id="f-actor" placeholder="actor (agent, playbook, analyst)">
+        <select id="f-tool"><option value="">all tools</option></select>
+        <select id="f-status"><option value="">all results</option>
+          <option>success</option><option>rejected</option><option>failed</option><option>dry_run</option><option>skipped</option></select>
+        <button class="ghost" id="refresh">Refresh</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>When</th><th>Actor</th><th>Tool</th><th>Target</th><th>Gate</th><th>Result</th><th>Verified</th><th>Expires</th><th></th></tr></thead>
+      <tbody id="actions"></tbody>
+    </table>
+    </div>
+  </section>
+  <section>
+    <h2>Active blocks</h2>
+    <table><thead><tr><th>Kind</th><th>IP</th><th>Reason</th><th>Remaining</th></tr></thead><tbody id="blocks"></tbody></table>
+  </section>
+  <section>
+    <div class="row" style="justify-content:space-between">
+      <h2>HAProxy sync (file vs live ACL)</h2>
+      <button class="ghost" id="reconcile">Reconcile</button>
+    </div>
+    <table><thead><tr><th>ACL</th><th>File</th><th>Live</th><th>Status</th></tr></thead><tbody id="sync"></tbody></table>
+  </section>
+  <section>
+    <h2>Allowlist (never blocked)</h2>
+    <table><thead><tr><th>IP</th><th>Owner</th><th>Reason</th><th></th></tr></thead><tbody id="allow"></tbody></table>
+    <div class="row" style="margin-top:8px">
+      <input id="a-ip" placeholder="IP"><input id="a-owner" placeholder="Owner"><input id="a-reason" placeholder="Reason" style="flex:1">
+      <button id="a-add">Add</button><span id="a-msg" class="bad"></span>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const when = (t) => t ? new Date(t).toLocaleString() : "—";
+const left = (t) => { if (!t) return "—"; const m = Math.round((new Date(t) - Date.now()) / 60000); return m > 0 ? `${m} min` : "expiring"; };
+async function api(path, opts = {}) {
+  const res = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || res.statusText);
+  return body;
+}
+const target = (a) => a.ip || a.user || a.pattern || a.path || a.asset || a.channel || "";
+const TOOLS = ["block_ip","unblock_ip","rate_limit_ip","tarpit_ip","verify_block","lock_account","revoke_sessions","add_waf_rule","quarantine_file","isolate_container","restart_service","update_case","notify"];
+$("f-tool").innerHTML += TOOLS.map((t) => `<option>${t}</option>`).join("");
+
+async function loadActions() {
+  const q = new URLSearchParams({actor: $("f-actor").value, tool: $("f-tool").value, status: $("f-status").value});
+  [...q.keys()].forEach((k) => !q.get(k) && q.delete(k));
+  const rows = await api("/api/actions?" + q);
+  $("actions").innerHTML = rows.map(({request: rq, result: rs}) => {
+    const done = rs.status === "success" && !rs.rejection_code;  // replays point at the original row
+    const undo = done && rs.rollback;
+    const ext = done && ["block_ip", "rate_limit_ip", "tarpit_ip"].includes(rq.tool);
+    const why = rs.rejection_code ? `<div class="muted">${esc(rs.rejection_code)}: ${esc(rs.error)}</div>` : (rs.error ? `<div class="muted">${esc(rs.error)}</div>` : "");
+    const ver = rs.verification ? (rs.verification.verified ? '<span class="ok">yes</span>' : '<span class="bad">no</span>') : "—";
+    return `<tr><td>${when(rs.finished_at)}</td><td>${esc(rq.actor)}</td><td><code>${esc(rq.tool)}</code></td>
+      <td>${esc(target(rq.args))}</td><td>${esc(rq.gate)}</td><td class="${esc(rs.status)}">${esc(rs.status)}${why}</td>
+      <td>${ver}</td><td>${when(rs.expires_at)}</td>
+      <td class="row">${undo ? `<button class="danger" data-undo="${esc(rq.id)}">Undo</button>` : ""}
+      ${ext ? `<button class="ghost" data-ext="${esc(rq.id)}">Extend</button>` : ""}</td></tr>`;
+  }).join("") || '<tr><td colspan="9" class="muted">No actions yet</td></tr>';
+  document.querySelectorAll("[data-undo]").forEach((b) => b.onclick = () => act(`/api/actions/${b.dataset.undo}/undo`, {}));
+  document.querySelectorAll("[data-ext]").forEach((b) => b.onclick = () => {
+    const minutes = parseInt(prompt("New duration in minutes (capped by the action's gate):", "60"), 10);
+    if (minutes > 0) act(`/api/actions/${b.dataset.ext}/extend`, {minutes});
+  });
+}
+
+async function act(path, body) {
+  try {
+    const r = await api(path, {method: "POST", body: JSON.stringify(body)});
+    if (r.status !== "success") alert(`${r.status}: ${r.error || ""}`);
+  } catch (e) { alert(e.message); }
+  loadAll();
+}
+
+async function loadBlocks() {
+  const data = await api("/api/blocks");
+  const rows = Object.entries(data).flatMap(([kind, list]) => list.map((b) => ({kind, ...b})));
+  $("blocks").innerHTML = rows.map((b) => `<tr><td>${esc(b.kind)}</td><td>${esc(b.ip)}</td><td>${esc(b.reason)}</td><td>${left(b.expires_at)}</td></tr>`).join("")
+    || '<tr><td colspan="4" class="muted">No active entries</td></tr>';
+}
+
+async function loadSync() {
+  const data = await api("/api/haproxy/sync");
+  $("sync").innerHTML = Object.entries(data).map(([k, s]) => `<tr><td>${esc(k)}</td><td>${s.file.length}</td><td>${s.live.length}</td>
+    <td class="${s.in_sync ? "ok" : "bad"}">${s.in_sync ? "in sync" : `out of sync (missing live: ${esc(s.missing_live.join(", ")) || "—"}; extra live: ${esc(s.extra_live.join(", ")) || "—"})`}</td></tr>`).join("");
+}
+
+async function loadAllow() {
+  const rows = await api("/api/allowlist");
+  $("allow").innerHTML = rows.map((a) => `<tr><td>${esc(a.ip)}</td><td>${esc(a.owner)}</td><td>${esc(a.reason)}</td>
+    <td>${a.owner === "built-in" ? "" : `<button class="ghost" data-rm="${esc(a.ip)}">Remove</button>`}</td></tr>`).join("");
+  document.querySelectorAll("[data-rm]").forEach((b) => b.onclick = async () => {
+    if (!confirm(`Remove ${b.dataset.rm} from the allowlist? It could then be blocked.`)) return;
+    await api(`/api/allowlist/${b.dataset.rm}`, {method: "DELETE"}); loadAllow();
+  });
+}
+
+$("a-add").onclick = async () => {
+  try {
+    await api("/api/allowlist", {method: "POST", body: JSON.stringify({ip: $("a-ip").value.trim(), owner: $("a-owner").value, reason: $("a-reason").value})});
+    ["a-ip", "a-owner", "a-reason"].forEach((id) => $(id).value = ""); $("a-msg").textContent = ""; loadAllow();
+  } catch (e) { $("a-msg").textContent = e.message; }
+};
+$("reconcile").onclick = async () => { await api("/api/haproxy/reconcile", {method: "POST"}); loadSync(); };
+$("refresh").onclick = loadActions;
+["f-tool", "f-status"].forEach((id) => $(id).onchange = loadActions);
+function loadAll() { loadActions(); loadBlocks(); loadSync(); loadAllow(); }
+loadAll();
+setInterval(() => { loadActions(); loadBlocks(); }, 5000);
+</script>
+</body>
+</html>

@@ -60,6 +60,9 @@ WRITE_TOOLS = frozenset(
         "notify",
         "update_case",
         "verify_block",
+        "quarantine_file",
+        "isolate_container",
+        "restart_service",
     }
 )
 

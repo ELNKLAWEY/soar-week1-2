@@ -1,4 +1,5 @@
 name: web_bruteforce_response
+description: Brute force / credential stuffing - block IP, lock account, end its sessions, notify
 trigger:
   incident_type: brute_force
   min_severity: medium
@@ -13,17 +14,34 @@ steps:
     args:
       ip: "{{ incident.src_ip }}"
       ttl_minutes: "{{ decide.ttl }}"
+      gate: "{{ decide.gate }}"
+      reason: brute force
   - id: lock
     action: webapp.lock_account
     when: decide.target_user
     args:
       user: "{{ decide.target_user }}"
+      gate: "{{ decide.gate }}"
+  - id: sessions
+    action: webapp.revoke_sessions
+    when: decide.target_user
+    args:
+      user: "{{ decide.target_user }}"
+      gate: "{{ decide.gate }}"
+  - id: case
+    action: case.update_case
+    when: 'decide.verdict == "true_positive"'
+    args:
+      status: contained
+      note: "Blocked {{ incident.src_ip }}; account {{ decide.target_user }} locked, sessions revoked"
   - id: notify
     action: notify.send
     args:
       channel: telegram
+      message: "Brute force from {{ incident.src_ip }} contained"
   - id: verify
     action: haproxy.verify_block
+    when: 'decide.verdict == "true_positive"'
     args:
       ip: "{{ incident.src_ip }}"
 on_error:

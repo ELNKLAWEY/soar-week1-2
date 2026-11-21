@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playbook Studio</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Sentinel SOAR</h1>
+  <a href="studio.html" class="active">Playbook Studio</a>
+  <a href="ledger.html">Actions Ledger</a>
+</header>
+<main class="grid2">
+  <section>
+    <h2>Playbooks</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Ver</th><th>Runs</th><th>OK</th></tr></thead>
+      <tbody id="list"></tbody>
+    </table>
+  </section>
+  <div style="display:grid;gap:16px;min-width:0">
+    <section>
+      <div class="row" style="justify-content:space-between">
+        <h2 id="title">Select a playbook</h2>
+        <span id="valid" class="muted"></span>
+      </div>
+      <textarea id="editor" rows="22" spellcheck="false" disabled></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="validate" class="ghost" disabled>Validate</button>
+        <input id="note" placeholder="Change note" style="flex:1;min-width:160px">
+        <button id="save" disabled>Save new version</button>
+      </div>
+    </section>
+    <section>
+      <h2>Dry-run with sample incident</h2>
+      <textarea id="ctx" rows="6" spellcheck="false">{
+  "incident": {"id": "inc-demo", "src_ip": "203.0.113.7"},
+  "decide": {"verdict": "true_positive", "ttl": 30, "gate": "G2", "target_user": "alice"}
+}</textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="dry" disabled>Dry-run editor content</button>
+        <span id="dryinfo" class="muted"></span>
+      </div>
+      <table style="margin-top:8px"><thead><tr><th>Step</th><th>Action</th><th>Result</th></tr></thead><tbody id="steps"></tbody></table>
+    </section>
+    <section>
+      <h2>Versions</h2>
+      <table><thead><tr><th>Ver</th><th>Saved</th><th>Note</th><th></th></tr></thead><tbody id="versions"></tbody></table>
+    </section>
+    <section>
+      <h2>Run history</h2>
+      <table><thead><tr><th>#</th><th>When</th><th>Ver</th><th>Mode</th><th>Result</th><th>ms</th><th></th></tr></thead><tbody id="runs"></tbody></table>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const when = (t) => t ? new Date(t).toLocaleString() : "—";
+async function api(path, opts = {}) {
+  const res = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || res.statusText);
+  return body;
+}
+let current = null;
+
+async function loadList() {
+  const rows = await api("/api/playbooks");
+  $("list").innerHTML = rows.map((p) => `<tr data-name="${esc(p.name)}" class="${p.name === current ? "sel" : ""}" style="cursor:pointer">
+    <td>${esc(p.name)}<div class="muted">${esc(p.trigger.incident_type || p.trigger.verdict || "")}</div></td>
+    <td>v${p.version}</td><td>${p.runs}</td>
+    <td>${p.success_rate == null ? "—" : Math.round(p.success_rate * 100) + "%"}</td></tr>`).join("");
+  document.querySelectorAll("#list tr").forEach((tr) => tr.onclick = () => open(tr.dataset.name));
+}
+
+async function open(name, version) {
+  current = name;
+  const pb = await api(`/api/playbooks/${name}` + (version ? `?version=${version}` : ""));
+  $("title").textContent = `${name} — v${pb.version}`;
+  $("editor").value = pb.yaml;
+  ["editor", "validate", "save", "dry"].forEach((id) => $(id).disabled = false);
+  $("valid").textContent = "";
+  $("steps").innerHTML = "";
+  await Promise.all([loadList(), loadVersions(), loadRuns()]);
+}
+
+async function loadVersions() {
+  const rows = await api(`/api/playbooks/${current}/versions`);
+  $("versions").innerHTML = rows.map((v, i) => `<tr><td>v${v.version}</td><td>${when(v.created_at)}</td><td>${esc(v.note)}</td>
+    <td class="row"><button class="ghost" data-view="${v.version}">View</button>
+    ${i ? `<button class="ghost" data-rb="${v.version}">Roll back</button>` : '<span class="pill">current</span>'}</td></tr>`).join("");
+  document.querySelectorAll("[data-view]").forEach((b) => b.onclick = () => open(current, b.dataset.view));
+  document.querySelectorAll("[data-rb]").forEach((b) => b.onclick = async () => {
+    if (!confirm(`Publish v${b.dataset.rb} again as the newest version?`)) return;
+    await api(`/api/playbooks/${current}/rollback`, {method: "POST", body: JSON.stringify({version: +b.dataset.rb})});
+    open(current);
+  });
+}
+
+async function loadRuns() {
+  const rows = await api(`/api/playbooks/${current}/runs`);
+  $("runs").innerHTML = rows.map((r) => `<tr><td>${r.id}</td><td>${when(r.started_at)}</td><td>${r.version ? "v" + r.version : "draft"}</td>
+    <td>${r.dry_run ? "dry-run" : "live"}</td><td class="${r.ok ? "ok" : "bad"}">${r.ok ? "ok" : "failed"}</td><td>${r.duration_ms}</td>
+    <td><button class="ghost" data-run="${r.id}">Steps</button></td></tr>`).join("") || '<tr><td colspan="7" class="muted">No runs yet</td></tr>';
+  document.querySelectorAll("[data-run]").forEach((b) => b.onclick = () => showSteps(rows.find((r) => r.id == b.dataset.run).steps));
+}
+
+function showSteps(steps) {
+  $("steps").innerHTML = steps.map((s) => `<tr><td>${esc(s.id)}</td><td><code>${esc(s.action)}</code></td>
+    <td>${s.skipped ? '<span class="warn">skipped (when=false)</span>' : `<pre>${esc(JSON.stringify(s.output))}</pre>`}</td></tr>`).join("");
+}
+
+$("validate").onclick = async () => {
+  const r = await api("/api/playbooks/validate", {method: "POST", body: JSON.stringify({yaml: $("editor").value})});
+  $("valid").className = r.valid ? "ok" : "bad";
+  $("valid").textContent = r.valid ? `valid · ${r.steps} steps` : r.error;
+  return r.valid;
+};
+$("save").onclick = async () => {
+  if (!(await $("validate").onclick())) return;
+  try {
+    const r = await api(`/api/playbooks/${current}`, {method: "PUT", body: JSON.stringify({yaml: $("editor").value, note: $("note").value})});
+    $("note").value = "";
+    open(current, r.version);
+  } catch (e) { $("valid").className = "bad"; $("valid").textContent = e.message; }
+};
+$("dry").onclick = async () => {
+  let context;
+  try { context = JSON.parse($("ctx").value); } catch { $("dryinfo").textContent = "context is not valid JSON"; return; }
+  try {
+    const run = await api(`/api/playbooks/${current}/dry-run`, {method: "POST", body: JSON.stringify({context, yaml: $("editor").value})});
+    $("dryinfo").textContent = `run #${run.id} · ${run.duration_ms} ms · nothing was executed`;
+    showSteps(run.steps);
+    loadRuns(); loadList();
+  } catch (e) { $("dryinfo").textContent = e.message; }
+};
+loadList();
+</script>
+</body>
+</html>

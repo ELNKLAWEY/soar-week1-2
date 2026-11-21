@@ -10,6 +10,7 @@ class MockWebsiteConnector:
     locked_accounts: set[str] = field(default_factory=set)
     revoked_sessions: set[str] = field(default_factory=set)
     waf_patterns: list[str] = field(default_factory=list)
+    quarantined: list[str] = field(default_factory=list)
 
     def lock_account(self, user: str) -> dict:
         self.locked_accounts.add(user)
@@ -22,3 +23,7 @@ class MockWebsiteConnector:
     def add_waf_rule(self, pattern: str) -> dict:
         self.waf_patterns.append(pattern)
         return {"pattern": pattern, "added": True}
+
+    def quarantine_file(self, path: str) -> dict:
+        self.quarantined.append(path)
+        return {"path": path, "quarantined": True}

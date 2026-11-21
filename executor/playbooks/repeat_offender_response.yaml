@@ -1,0 +1,39 @@
+name: repeat_offender_response
+description: Repeat offender - escalate block duration (1h, 6h, 24h) by offence tier
+trigger:
+  incident_type: repeat_offender
+  min_severity: medium
+steps:
+  - id: tier1
+    action: haproxy.block_ip
+    when: 'incident.offense_tier == "1"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: 60
+      gate: G2
+      reason: repeat offender tier 1
+  - id: tier2
+    action: haproxy.block_ip
+    when: 'incident.offense_tier == "2"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: 360
+      gate: G2
+      reason: repeat offender tier 2
+  - id: tier3
+    action: haproxy.block_ip
+    when: 'incident.offense_tier == "3"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: 1440
+      gate: G3
+      reason: repeat offender tier 3
+  - id: notify
+    action: notify.send
+    args:
+      channel: telegram
+      message: "Repeat offender {{ incident.src_ip }} blocked (tier {{ incident.offense_tier }})"
+  - id: verify
+    action: haproxy.verify_block
+    args:
+      ip: "{{ incident.src_ip }}"

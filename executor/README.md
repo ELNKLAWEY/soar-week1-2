@@ -2,62 +2,58 @@
 
 Everything that **carries out** decisions safely:
 
-- Policy Guard (code safety, not prompts)
-- Playbook YAML engine (dry-run in Week 1–2)
-- Action workers + mock HAProxy / website connectors
-- In-memory action queue (Redis Streams later)
-- Audit JSONL stub
-- Kill switch / autonomy modes
+| Part | File | Task |
+|---|---|---|
+| Policy Guard (allowlist, TTL per gate, blast radius, scope, valid IPs) | `policy_guard.py` | M4 |
+| Playbook engine (YAML, conditions, templates, dry-run, validation) | `playbook_engine.py` | M1 |
+| Playbook library — 10 playbooks | `playbooks/*.yaml` | M7 |
+| Action worker (idempotent, audited, results on the case timeline) | `worker.py` | M2 |
+| Redis Streams queue `actions` (group `executor`, DLQ `actions:dlq`) | `queue.py` | M2 |
+| HAProxy Runtime API connector (add/del/show acl, ACL file, TTL, reconcile) | `connectors/haproxy_runtime.py` | M3 |
+| Website hooks: lock account, end sessions, WAF rule, quarantine | `connectors/website_http.py` + `../website_hooks/` | M6 |
+| Kill switch / autonomy modes | `modes.py` | M5 |
+| Case management (rules, states, SLA, notes, timeline, closure) | `cases.py` | M8 |
+| Playbook Studio page + API | `ui/studio.html`, `playbook_store.py`, `api.py` | M9 |
+| Actions Ledger + Response page + API | `ui/ledger.html`, `api.py` | M10 |
 
-Contract for team approval: [`docs/contracts/action_contract.md`](../docs/contracts/action_contract.md)  
-Week 1–2 completion notes: [`docs/Mohamed_Week1_2_DONE.md`](../docs/Mohamed_Week1_2_DONE.md)
+Contract: [`docs/contracts/action_contract.md`](../docs/contracts/action_contract.md)
 
-## Week 1–2 scope
-
-| Done now | Later (Week 3+) |
-|---|---|
-| Action schemas in `common/schemas/actions.py` | Real Redis Streams consumer |
-| Policy Guard v0 + tests | Real HAProxy runtime socket |
-| Two sample playbook dry-runs | Full 10-playbook library (M7) |
-| MockHAProxy + modes + audit | Case management APIs (M8) |
-| In-memory queue + demo | Dashboard pages |
-
-**You do not train the ML model for production.** Habiba owns that; local train is optional for playbook alignment.
-
-## Run
+## Run the real stack (Redis + HAProxy + website + executor)
 
 ```bash
-cd "/Users/macbook/.cursor/graduation project"
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pytest executor/tests -q
+docker compose up -d --build
+```
+
+- Actions Ledger: http://localhost:8080/ui/ledger.html
+- Playbook Studio: http://localhost:8080/ui/studio.html
+- Skyline site through HAProxy: http://localhost:8081
+- API docs: http://localhost:8080/docs
+
+Send an action the way the agent does (block the `attacker` container):
+
+```bash
+ATT=$(docker inspect -f '{{(index .NetworkSettings.Networks "sentinel_lab").IPAddress}}' $(docker compose ps -q attacker))
+docker compose exec redis redis-cli XADD actions '*' request "{\"incident_id\":\"inc-1\",\"tool\":\"block_ip\",\"args\":{\"ip\":\"$ATT\",\"ttl_minutes\":5},\"gate\":\"G2\"}"
+docker compose exec attacker curl -s -o /dev/null -w "%{http_code}\n" http://haproxy/   # 403
+```
+
+Then press **Undo** in the Ledger: the entry is removed from HAProxy and the same curl returns 200.
+Incidents written to the `incidents` stream (field `incident`, JSON) open cases automatically.
+
+## Configuration (env)
+
+| Variable | Effect | Default |
+|---|---|---|
+| `SENTINEL_ACTION_QUEUE=redis`, `REDIS_URL` | Redis Streams queue + Redis idempotency store | in-memory |
+| `HAPROXY_SOCKET` | `host:port` or unix socket path of the Runtime API | mock HAProxy |
+| `HAPROXY_ACL_DIR` | ACL files + `state.json`; same path in executor and HAProxy | `/acl` |
+| `WEBSITE_URL`, `WEBSITE_PLATFORM_TOKEN` | skyline-web platform endpoints | mock website |
+| `DOCKER_ACTIONS=1`, `DOCKER_LAB_NETWORK` | enable `isolate_container` / `restart_service` | disabled |
+| `SENTINEL_DB`, `SENTINEL_AUDIT_PATH` | SQLite (cases, playbooks, allowlist) and audit JSONL | `logs/` |
+
+## Tests
+
+```bash
+pytest -q          # 51 tests: guard, worker, Redis queue, HAProxy socket protocol, website, cases, playbooks, API
 python -m executor.demo
 ```
-
-Demo covers: allowlist reject → queue → mock block (idempotent) → paused → shadow → playbook step history → audit lines.
-
-## Layout
-
-```
-executor/
-  policy_guard.py      # M4
-  playbook_engine.py   # M1
-  modes.py             # M5 stub
-  queue.py             # in-memory actions queue
-  audit.py             # JSONL audit stub
-  connectors/          # mock HAProxy + website
-  playbooks/           # YAML samples
-  worker.py            # Guard → modes → connectors
-  demo.py
-  tests/
-```
-
-## Real HAProxy later (not Week 1–2)
-
-Week 3+ will open the HAProxy Runtime API socket (typically `/var/run/haproxy/admin.sock`) and send:
-
-- `add acl #<id> <ip>`
-- `del acl #<id> <ip>`
-- `show acl #<id>`
-
-Until then, `MockHAProxyConnector` holds an in-memory ACL with TTL + `verify_block`.

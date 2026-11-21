@@ -71,9 +71,30 @@ class PlaybookRun:
 
 class PlaybookEngine:
     def load(self, path: str | Path) -> dict[str, Any]:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        return self.parse(Path(path).read_text(encoding="utf-8"))
+
+    def parse(self, text: str) -> dict[str, Any]:
+        """Parse and validate playbook YAML; raises ValueError with a readable message."""
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"invalid YAML: {exc}") from exc
         if not isinstance(data, dict) or "name" not in data or "steps" not in data:
             raise ValueError("playbook must have name and steps")
+        if not re.fullmatch(r"[a-z0-9_]+", str(data["name"])):
+            raise ValueError("name must be lowercase letters, digits and _")
+        steps = data["steps"]
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("steps must be a non-empty list")
+        seen: set[str] = set()
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict) or "id" not in step or "action" not in step:
+                raise ValueError(f"step {i + 1} needs id and action")
+            if step["id"] in seen:
+                raise ValueError(f"duplicate step id {step['id']}")
+            seen.add(step["id"])
+            if "args" in step and not isinstance(step["args"], dict):
+                raise ValueError(f"step {step['id']}: args must be a mapping")
         return data
 
     def run(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 
 from common.schemas.actions import (
@@ -11,6 +12,21 @@ from common.schemas.actions import (
     Gate,
     RejectionCode,
 )
+
+
+# tools that act on an IP at HAProxy; the first three hold an entry with a TTL
+IP_TOOLS = {"block_ip", "rate_limit_ip", "tarpit_ip", "unblock_ip"}
+TTL_TOOLS = {"block_ip", "rate_limit_ip", "tarpit_ip"}
+SOFT_DEFAULT_TTL = 15  # minutes, for rate_limit_ip / tarpit_ip when not given
+REQUIRED_ARGS = {
+    "verify_block": "ip",
+    "lock_account": "user",
+    "revoke_sessions": "user",
+    "add_waf_rule": "pattern",
+    "quarantine_file": "path",
+    "isolate_container": "asset",
+    "restart_service": "asset",
+}
 
 
 @dataclass
@@ -48,6 +64,7 @@ class PolicyConfig:
                 "tarpit_ip",
                 "block_ip",
                 "unblock_ip",
+                "restart_service",
             },
             Gate.G2: {
                 "notify",
@@ -60,6 +77,8 @@ class PolicyConfig:
                 "lock_account",
                 "revoke_sessions",
                 "add_waf_rule",
+                "quarantine_file",
+                "restart_service",
             },
             Gate.G3: WRITE_TOOLS.copy(),
         }
@@ -107,12 +126,22 @@ class PolicyGuard:
                 RejectionCode.GATE_TOO_LOW,
             )
 
+        required = REQUIRED_ARGS.get(tool)
+        if required and not request.args.get(required):
+            return PolicyDecision(
+                False,
+                f"{required} is required",
+                RejectionCode.INVALID_ARGS,
+            )
+
         ip = request.args.get("ip")
-        if tool in {"block_ip", "rate_limit_ip", "tarpit_ip", "unblock_ip"}:
-            if not ip or not isinstance(ip, str):
+        if tool in IP_TOOLS:
+            try:
+                ipaddress.ip_address(ip)  # single address only: no CIDR, no injected text
+            except ValueError:
                 return PolicyDecision(
                     False,
-                    "ip is required",
+                    f"invalid ip: {ip!r}",
                     RejectionCode.INVALID_ARGS,
                 )
             if ip in self.config.allowlist:
@@ -130,8 +159,12 @@ class PolicyGuard:
                 RejectionCode.SCOPE,
             )
 
-        if tool == "block_ip":
-            ttl = int(request.args.get("ttl_minutes", 0))
+        if tool in TTL_TOOLS:
+            default = 0 if tool == "block_ip" else SOFT_DEFAULT_TTL
+            try:
+                ttl = int(request.args.get("ttl_minutes") or default)
+            except (TypeError, ValueError):
+                ttl = 0
             max_ttl = MAX_TTL_MINUTES[request.gate]
             if ttl <= 0:
                 return PolicyDecision(
@@ -145,6 +178,8 @@ class PolicyGuard:
                     f"ttl {ttl}m exceeds max {max_ttl}m for {request.gate.value}",
                     RejectionCode.TTL_TOO_LONG,
                 )
+
+        if tool == "block_ip":
             if len(self._active_blocks) >= self.config.max_active_blocks:
                 return PolicyDecision(
                     False,

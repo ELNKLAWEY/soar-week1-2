@@ -1,0 +1,58 @@
+# Lab stack for the SOAR core: real Redis Streams + real HAProxy Runtime API.
+#   docker compose up -d --build
+#   Ledger:  http://localhost:8080/ui/ledger.html   Studio: http://localhost:8080/ui/studio.html
+#   Site through HAProxy: http://localhost:8081
+services:
+  redis:
+    image: redis:7.4-alpine
+    networks: [lab]
+
+  website:
+    build: {context: ., dockerfile: executor/Dockerfile}
+    command: ["uvicorn", "website_hooks.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      WEBSITE_PLATFORM_TOKEN: ${WEBSITE_PLATFORM_TOKEN:-change-me-lab-token}
+    networks: [lab]
+
+  haproxy:
+    image: haproxy:2.9
+    user: root  # creates the ACL files on the shared volume before starting
+    command: ["sh", "-c", "touch /acl/blocklist.acl /acl/tarpit.acl /acl/ratelimit.acl && exec haproxy -f /usr/local/etc/haproxy/haproxy.cfg"]
+    volumes:
+      - ./deploy/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - acl:/acl
+    ports: ["8081:80"]
+    depends_on: [website]
+    networks: [lab]
+
+  executor:
+    build: {context: ., dockerfile: executor/Dockerfile}
+    environment:
+      SENTINEL_ACTION_QUEUE: redis
+      REDIS_URL: redis://redis:6379/0
+      HAPROXY_SOCKET: haproxy:9999
+      HAPROXY_ACL_DIR: /acl
+      WEBSITE_URL: http://website:8000
+      WEBSITE_PLATFORM_TOKEN: ${WEBSITE_PLATFORM_TOKEN:-change-me-lab-token}
+      SENTINEL_DB: /data/executor.db
+      SENTINEL_AUDIT_PATH: /data/actions.jsonl
+    volumes:
+      - acl:/acl
+      - executor-data:/data
+    ports: ["8080:8080"]
+    depends_on: [redis, haproxy, website]
+    networks: [lab]
+
+  # demo client with its own address, so blocking it never blocks the admin (Project Details §10.2)
+  attacker:
+    image: curlimages/curl:8.11.1
+    command: ["sleep", "infinity"]
+    networks: [lab]
+
+volumes:
+  acl:
+  executor-data:
+
+networks:
+  lab:
+    name: sentinel_lab

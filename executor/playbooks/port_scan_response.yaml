@@ -1,0 +1,30 @@
+name: port_scan_response
+description: Port scan / reconnaissance - tarpit, short block, watch list
+trigger:
+  incident_type: port_scan
+  min_severity: low
+steps:
+  - id: decide
+    action: agent.decide
+  - id: tarpit
+    action: haproxy.tarpit_ip
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: 15
+  - id: short_block
+    action: haproxy.block_ip
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"
+      ttl_minutes: 15
+      reason: scan
+  - id: watchlist
+    action: case.update_case
+    args:
+      tag: watchlist
+      note: "{{ incident.src_ip }} added to the watch list"
+  - id: verify
+    action: haproxy.verify_block
+    when: 'decide.verdict == "true_positive"'
+    args:
+      ip: "{{ incident.src_ip }}"

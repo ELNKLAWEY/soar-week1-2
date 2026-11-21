@@ -1,0 +1,21 @@
+name: service_health_response
+description: Service health - notify, restart the service, fall back to rules
+trigger:
+  incident_type: platform_alert
+steps:
+  - id: notify
+    action: notify.send
+    args:
+      channel: telegram
+      message: "Platform alert: {{ incident.service }} is {{ incident.state }}"
+  - id: restart
+    action: docker.restart_service
+    when: 'decide.restart == "true"'
+    args:
+      asset: "{{ incident.service }}"
+  - id: fallback
+    action: notify.send
+    when: 'incident.service == "agent"'
+    args:
+      channel: telegram
+      message: "AI agent down - decisions now use the fallback rule engine"
